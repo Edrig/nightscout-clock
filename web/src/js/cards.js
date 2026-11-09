@@ -997,7 +997,7 @@ function alertWindows(a) {
  * @returns {HTMLElement}
  */
 function systemTab() {
-    return el("div.stack", wifiCard(), extraWifiCard(), hostnameCard(), lowBatteryCard(), loginCard(), backupCard(), versionCard(), logsCard())
+    return el("div.stack", wifiCard(), extraWifiCard(), hostnameCard(), lowBatteryCard(), loginCard(), backupCard(), versionCard(), updateCard(), logsCard())
 }
 
 /**
@@ -1232,6 +1232,68 @@ function versionCard() {
         el("dl.kv", el("dt", "Current version"), el("dd", { id: "fw_current" }, ui.versions.current || "…"),
             el("dt", "Latest version"), el("dd", { id: "fw_latest" }, ui.versions.latest || "…")),
         el("p.help", { id: "fw_status" }, ...versionStatusNodes())), { id: "card_version" })
+}
+
+/**
+ * Upload a firmware or filesystem image built with PlatformIO, over WiFi.
+ * @returns {HTMLElement}
+ */
+function updateCard() {
+    const target = el("select", { id: "f_update_target" },
+        el("option", { value: "firmware" }, "Firmware (firmware.bin)"),
+        el("option", { value: "filesystem" }, "Settings page (littlefs.bin)"))
+    const input = el("input", { type: "file", accept: ".bin", hidden: true })
+    input.addEventListener("change", async () => {
+        const file = input.files[0]
+        input.value = ""
+        if (!file) return
+        const what = target.value
+        overlay("Updating", `Uploading ${file.name}…`)
+        const r = await api.uploadUpdate(file, what, (phase, n) => overlay(
+            phase === "uploading" ? "Updating" : "Restarting",
+            phase === "uploading" ? `Uploading ${file.name}: ${n}%` : `The clock is restarting with the new ${what}… ${n}s`))
+        overlay(null)
+        if (!r.ok) return toast(r.error, "bad", 8000)
+        toast("Update installed. Reloading the page.")
+        setTimeout(() => location.reload(), 1500)
+    })
+    const report = el("p.help", { id: "gh_update_status" }, "Checks the latest release of the clock's GitHub repository.")
+    const installBtn = el("button.btn.primary", { type: "button", hidden: true }, icon("download"), "Install")
+    const checkBtn = el("button.btn", { type: "button" }, icon("download"), "Check GitHub for updates")
+    checkBtn.addEventListener("click", async () => {
+        checkBtn.disabled = true
+        report.textContent = "Checking GitHub…"
+        const r = await api.checkGithubUpdate()
+        checkBtn.disabled = false
+        installBtn.hidden = true
+        if (!r.ok) { report.textContent = `Could not check: ${r.error}`; return }
+        const d = r.data
+        if (d.available) {
+            report.textContent = `Version ${d.latest} is available (installed: ${d.current || "unknown"}).`
+            installBtn.replaceChildren(icon("download"), `Install ${d.latest}`)
+            installBtn.hidden = false
+        } else {
+            report.textContent = `You are up to date (${d.current || "unknown"}; latest release on ${d.repo}: ${d.latest}).`
+        }
+    })
+    installBtn.addEventListener("click", async () => {
+        installBtn.disabled = checkBtn.disabled = true
+        overlay("Updating", "Downloading from GitHub…")
+        const r = await api.installGithubUpdate((phase, n) => overlay(
+            phase === "restarting" ? "Restarting" : "Updating",
+            phase === "firmware" ? `Downloading the firmware… ${n}%` : phase === "filesystem" ? `Downloading the settings page… ${n}%` : `The clock is restarting… ${n}s`))
+        overlay(null)
+        installBtn.disabled = checkBtn.disabled = false
+        if (!r.ok) return toast(r.error, "bad", 10000)
+        toast("Update installed. Reloading the page.")
+        setTimeout(() => location.reload(), 1500)
+    })
+    return card("Update over WiFi", "Install the latest release from GitHub, or a firmware.bin / littlefs.bin built with PlatformIO. Settings are kept. If the settings page ever breaks, the update page stays available at /update.", el("div.stack",
+        el("div.row", checkBtn, installBtn),
+        report,
+        el("div.field", el("label", { for: "f_update_target" }, "Or install a file: what to update"), target),
+        el("div.row", el("button.btn", { type: "button", onclick: () => input.click() }, icon("upload"), "Choose a .bin file and install"), input)),
+        { id: "card_update" })
 }
 
 const DEBUG_FIRMWARE_URL = "https://ktomy.github.io/nightscout-clock/debug/"

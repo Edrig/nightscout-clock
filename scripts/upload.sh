@@ -71,7 +71,7 @@ fi
 
 if [[ $UPLOAD_MODE == fs || $UPLOAD_MODE == all ]]; then
     require_artifact "$BUILD_DIR/littlefs.bin"
-    flash_arguments+=(0x210000 "$BUILD_DIR/littlefs.bin")
+    flash_arguments+=(0x3B0000 "$BUILD_DIR/littlefs.bin")
 fi
 
 if [[ $UPLOAD_MODE == all ]]; then

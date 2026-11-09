@@ -17,7 +17,7 @@ const DATA = path.join(ROOT, "data");
 // Order matters: later files use what earlier ones define.
 const JS = ["util.js", "api.js", "schema.js", "form.js", "cards.js", "app.js"];
 
-// Gzipped page budget. The whole LittleFS partition is 1 MB.
+// Gzipped page budget. The whole LittleFS partition is 320 KB.
 const BUDGET_BYTES = 200000;
 
 /**

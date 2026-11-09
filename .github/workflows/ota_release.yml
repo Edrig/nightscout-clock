@@ -1,0 +1,54 @@
+name: OTA release
+
+# Push a tag such as v1.2.1 to build firmware.bin and littlefs.bin and publish them as a GitHub release.
+# The clock installs them from "Update over WiFi" > "Check GitHub for updates".
+# (Tags starting with "v-" are left to the upstream GitHub Pages workflow.)
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+
+      - name: Write the version from the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          printf '%s' "$version" > data/version.txt
+          echo "Building version $version"
+
+      - name: Build firmware
+        run: pio run --environment ulanzi
+      - name: Build filesystem image
+        run: pio run --target buildfs --environment ulanzi
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            .pio/build/ulanzi/firmware.bin \
+            .pio/build/ulanzi/littlefs.bin \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Firmware and filesystem image for over-the-air updates."

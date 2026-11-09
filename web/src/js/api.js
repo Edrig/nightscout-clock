@@ -330,5 +330,97 @@ const api = (() => {
         })
     }
 
-    return { on: events.on, startStatus, saveSettings, authStatus, login, logout, loadConfig, version, downloadLogs, timezones, tryAlarm, switchFace, patients, scanWifi }
+    /**
+     * Upload a firmware.bin or littlefs.bin over WiFi, then wait for the clock to restart.
+     * Uses XMLHttpRequest because fetch cannot report upload progress.
+     * @param {File} file - Binary built by PlatformIO.
+     * @param {'firmware' | 'filesystem'} target - Partition to write.
+     * @param {(phase: 'uploading' | 'restarting', value: number) => void} [onPhase] - Percent while uploading, seconds while restarting.
+     * @returns {Promise<{ok: boolean, locked?: boolean, error?: string}>}
+     */
+    function uploadUpdate(file, target, onPhase = () => {}) {
+        return exclusive(async () => {
+            const reply = await new Promise(resolve => {
+                const xhr = new XMLHttpRequest()
+                const data = new FormData()
+                data.append("update", file, file.name)
+                xhr.open("POST", `/api/update?target=${target}`)
+                xhr.withCredentials = true
+                xhr.upload.onprogress = e => { if (e.lengthComputable) onPhase("uploading", Math.round(e.loaded * 100 / e.total)) }
+                xhr.onload = () => {
+                    let body = null
+                    try { body = JSON.parse(xhr.responseText) } catch (e) { /* not JSON */ }
+                    resolve({ status: xhr.status, body })
+                }
+                xhr.onerror = () => resolve({ status: 0, body: null })
+                xhr.send(data)
+            })
+            if (reply.status === 401) {
+                events.emit("locked")
+                return { ok: false, locked: true, error: "Your login has expired. Unlock settings and try again." }
+            }
+            if (reply.status !== 200) {
+                const reason = reply.status === 0 ? "the upload was interrupted" : (reply.body && (reply.body.error || reply.body.status)) || `HTTP ${reply.status}`
+                return { ok: false, error: `Update failed: ${reason}.` }
+            }
+            if (!(await waitForClock({ onTick: s => onPhase("restarting", s) }))) {
+                return { ok: false, error: "The update was written, but the clock has not come back after 90 seconds." }
+            }
+            return { ok: true }
+        })
+    }
+
+    const sleepMs = ms => new Promise(r => setTimeout(r, ms))
+
+    /**
+     * Ask the clock to check its GitHub repository for a newer release and wait for the answer.
+     * @returns {Promise<{ok: boolean, data?: Object, error?: string}>}
+     */
+    async function checkGithubUpdate() {
+        const r = await request("POST", "/api/update/github/check", { body: {} })
+        if (!r.ok) return { ok: false, error: r.status === 401 ? "Unlock settings first." : `The clock answered ${r.status}.` }
+        for (let i = 0; i < 30; i++) {
+            await sleepMs(1000)
+            const s = await request("GET", "/api/update/github").catch(() => null)
+            if (!s || !s.ok || !s.data) continue
+            if (s.data.state === "checked") return { ok: true, data: s.data }
+            if (s.data.state === "error") return { ok: false, error: s.data.error, data: s.data }
+        }
+        return { ok: false, error: "The clock did not answer in time." }
+    }
+
+    /**
+     * Install the latest GitHub release, follow the download progress, then wait for the restart.
+     * @param {(phase: 'firmware' | 'filesystem' | 'restarting', value: number) => void} [onPhase]
+     * @returns {Promise<{ok: boolean, error?: string}>}
+     */
+    function installGithubUpdate(onPhase = () => {}) {
+        return exclusive(async () => {
+            const r = await request("POST", "/api/update/github/install", { body: {} })
+            if (!r.ok) return { ok: false, error: r.status === 401 ? "Unlock settings first." : r.status === 409 ? "An update is already running." : `The clock answered ${r.status}.` }
+            const start = Date.now()
+            let misses = 0
+            while (Date.now() - start < 10 * 60000) {
+                await sleepMs(1500)
+                const s = await request("GET", "/api/update/github", { timeout: 5000 }).catch(() => null)
+                if (!s || !s.ok || !s.data) {
+                    // The clock stops answering once it restarts
+                    if (++misses >= 3) break
+                    continue
+                }
+                misses = 0
+                const st = s.data.state
+                if (st === "error") return { ok: false, error: s.data.error }
+                if (st === "downloading_firmware") onPhase("firmware", s.data.progress)
+                else if (st === "downloading_filesystem") onPhase("filesystem", s.data.progress)
+                else if (st === "restarting") onPhase("restarting", 0)
+            }
+            if (!(await waitForClock({ firstWaitMs: 1000, onTick: n => onPhase("restarting", n) }))) {
+                return { ok: false, error: "The update was installed, but the clock has not come back after 90 seconds." }
+            }
+            return { ok: true }
+        })
+    }
+
+    return { on: events.on, startStatus, saveSettings, uploadUpdate, checkGithubUpdate, installGithubUpdate, authStatus, login, logout, loadConfig, version, downloadLogs, timezones, tryAlarm, switchFace, patients, scanWifi }
 })()

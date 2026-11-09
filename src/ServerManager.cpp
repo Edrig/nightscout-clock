@@ -4,6 +4,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
+#include <Update.h>
 #include <WiFi.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
@@ -11,6 +12,7 @@
 #include "BGDisplayManager.h"
 #include "BGSourceManager.h"
 #include "DisplayManager.h"
+#include "OtaManager.h"
 #include "PeripheryManager.h"
 #include "SettingsManager.h"
 #include "globals.h"
@@ -608,6 +610,8 @@ void ServerManager_::setupWebServer(IPAddress ip) {
         request->redirect("/");
     });
 
+    setupOtaHandlers();
+
     ws->onNotFound([](AsyncWebServerRequest* request) {
         if (request->method() == HTTP_OPTIONS) {
             request->send(200);
@@ -720,9 +724,158 @@ void ServerManager_::setup() {
 }
 
 void ServerManager_::tick() {
+    if (otaRestartAtMs != 0 && (long)(millis() - otaRestartAtMs) >= 0) {
+        DEBUG_PRINTLN("OTA: restarting");
+        LittleFS.end();
+        ESP.restart();
+    }
+
     if (apMode) {
         dnsServer.processNextRequest();
     } else {
         initTimeIfNeeded();
+        OtaManager.tick();
     }
+}
+
+// Fallback update page, compiled into the firmware so it still works if the LittleFS image is missing
+// or a filesystem update failed halfway.
+static const char OTA_PAGE[] PROGMEM = R"rawliteral(<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clock update</title>
+<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;max-width:420px;margin:2em auto;padding:0 16px}
+select,input,button{font-size:1em;margin:.4em 0;width:100%}progress{width:100%}</style></head>
+<body><h2>Nightscout clock update</h2>
+<p><select id="t"><option value="firmware">Firmware (firmware.bin)</option>
+<option value="filesystem">Web page / filesystem (littlefs.bin)</option></select>
+<input type="file" id="f" accept=".bin"><button id="b">Upload</button></p>
+<progress id="p" max="100" value="0" hidden></progress><p id="s"></p>
+<p><a href="/" style="color:#4cd7f6">Back to settings</a></p>
+<script>
+b.onclick=()=>{const file=f.files[0];if(!file){s.textContent="Choose a .bin file.";return}
+const x=new XMLHttpRequest(),d=new FormData();d.append("update",file,file.name);
+x.open("POST","/api/update?target="+t.value);p.hidden=false;b.disabled=true;
+x.upload.onprogress=e=>{if(e.lengthComputable)p.value=e.loaded*100/e.total};
+x.onload=()=>{let r={};try{r=JSON.parse(x.responseText)}catch(e){}
+if(x.status==200){s.textContent="Done. The clock is restarting…";setTimeout(()=>location.href="/",15000)}
+else{s.textContent="Failed: "+(r.error||r.status||x.status);b.disabled=false}};
+x.onerror=()=>{s.textContent="Upload interrupted.";b.disabled=false};x.send(d)}
+</script></body></html>)rawliteral";
+
+void ServerManager_::setupOtaHandlers() {
+    // Latest GitHub release: GET reports the state, POST .../check and .../install queue work for the main loop.
+    ws->on("/api/update/github", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", OtaManager.statusJson());
+    });
+    ws->on("/api/update/github/check", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        if (!enforceAuthentication(request)) {
+            return;
+        }
+        OtaManager.requestCheck();
+        request->send(200, "application/json", OtaManager.statusJson());
+    });
+    ws->on("/api/update/github/install", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        if (!enforceAuthentication(request)) {
+            return;
+        }
+        if (!OtaManager.requestInstall()) {
+            request->send(409, "application/json", "{\"status\": \"busy\"}");
+            return;
+        }
+        request->send(200, "application/json", OtaManager.statusJson());
+    });
+
+    ws->on("/update", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/html", OTA_PAGE);
+    });
+
+    // POST /api/update?target=firmware|filesystem with a multipart file field.
+    // Firmware updates keep the settings; filesystem updates put config.json back after writing the image.
+    ws->on(
+        "/api/update", HTTP_POST,
+        [this](AsyncWebServerRequest* request) {
+            if (!otaAllowed) {
+                if (otaError == "unauthorized") {
+                    request->send(401, "application/json", "{\"status\": \"unauthorized\"}");
+                } else {
+                    String error = otaError.length() > 0 ? otaError : "no file received";
+                    request->send(400, "application/json", "{\"status\": \"error\", \"error\": \"" + error + "\"}");
+                }
+                otaError = "";
+                return;
+            }
+            otaAllowed = false;
+            if (otaError.length() > 0 || Update.hasError()) {
+                if (otaError.length() == 0) {
+                    otaError = Update.errorString();
+                }
+                request->send(500, "application/json", "{\"status\": \"error\", \"error\": \"" + otaError + "\"}");
+                return;
+            }
+            AsyncWebServerResponse* response =
+                request->beginResponse(200, "application/json", "{\"status\": \"ok\"}");
+            response->addHeader("Connection", "close");
+            request->send(response);
+            // Restart from the main loop once the response has had time to leave
+            otaRestartAtMs = millis() + 1500;
+            if (otaRestartAtMs == 0) {
+                otaRestartAtMs = 1;
+            }
+        },
+        [this](
+            AsyncWebServerRequest* request, const String& filename, size_t index, uint8_t* data, size_t len,
+            bool final) {
+            if (index == 0) {
+                otaError = "";
+                otaAllowed = false;
+                if (isWebAuthEnabled() && !isRequestAuthenticated(request)) {
+                    otaError = "unauthorized";
+                    return;
+                }
+                if (Update.isRunning()) {
+                    otaError = "another update is already running";
+                    return;
+                }
+                otaAllowed = true;
+                otaIsFilesystem = request->hasParam("target") &&
+                                  request->getParam("target")->value() == "filesystem";
+                DEBUG_PRINTF(
+                    "OTA: %s update started (%s)\n", otaIsFilesystem ? "filesystem" : "firmware",
+                    filename.c_str());
+
+                if (otaIsFilesystem) {
+                    OtaManager.beginFilesystemWrite();
+                }
+
+                if (!Update.begin(UPDATE_SIZE_UNKNOWN, otaIsFilesystem ? U_SPIFFS : U_FLASH)) {
+                    otaError = Update.errorString();
+                    DEBUG_PRINTF("OTA: begin failed: %s\n", otaError.c_str());
+                    return;
+                }
+            }
+
+            if (!otaAllowed || otaError.length() > 0) {
+                return;
+            }
+
+            if (len > 0 && Update.write(data, len) != len) {
+                otaError = Update.errorString();
+                DEBUG_PRINTF("OTA: write failed: %s\n", otaError.c_str());
+                Update.abort();
+                return;
+            }
+
+            if (final) {
+                if (!Update.end(true)) {
+                    otaError = Update.errorString();
+                    DEBUG_PRINTF("OTA: end failed: %s\n", otaError.c_str());
+                    return;
+                }
+                DEBUG_PRINTF("OTA: %u bytes written\n", (unsigned)(index + len));
+
+                if (otaIsFilesystem && !OtaManager.endFilesystemWrite()) {
+                    otaError = "the new filesystem image could not be mounted";
+                }
+            }
+        });
 }
