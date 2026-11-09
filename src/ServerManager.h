@@ -29,6 +29,13 @@ private:
     unsigned long webAuthTokenIssuedMs = 0;
     unsigned long wifiScanStartedMs = 0;
 
+    // Over-the-air update (firmware or LittleFS image uploaded through the web server)
+    void setupOtaHandlers();
+    bool otaAllowed = false;
+    bool otaIsFilesystem = false;
+    String otaError;
+    unsigned long otaRestartAtMs = 0;
+
 public:
     static ServerManager_& getInstance();
     void setup();

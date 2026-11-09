@@ -25,7 +25,7 @@ const JS = ["util.js", "api.js", "schema.js", "form.js", "preview.js", "preview-
 // The simulator page: the preview and the schema's constants, without the clock's API or the settings form.
 const SIM_JS = ["util.js", "schema.js", "preview.js", "preview-panel.js", path.join(SIM, "simulator.js")];
 
-// Gzipped page budget. The whole LittleFS partition is 1 MB.
+// Gzipped page budget. The whole LittleFS partition is 320 KB.
 const BUDGET_BYTES = 200000;
 // The clock preview emulator, built by web/emulator/build.mjs.
 const EMULATOR_BUDGET_BYTES = 70000;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "ServerManager.h"
 #include "globals.h"
 
 const uint16_t BGDisplayFace::IN_RANGE_COLORS[6] = {0xF81F, 0xE01F, 0xB19F, 0x781F, 0x401F, 0x1C9F};
@@ -15,11 +16,21 @@ uint16_t BGDisplayFace::lighten(uint16_t color) {
 
 void BGDisplayFace::showNoData() const {
     DisplayManager.clearMatrix();
-    // Reset the font because the previous face may have left LARGE selected,
-    // which makes "No data" too wide for the panel.
+    // No glucose data: show the time instead of "No data".
+    // Reset the font because the previous face may have left LARGE selected.
     DisplayManager.setFont(FONT_TYPE::MEDIUM);
+    tm timeinfo = ServerManager.getTimezonedTime();
+
+    char text[16];
+    if (SettingsManager.settings.time_format == TIME_FORMAT::HOURS_12) {
+        int hour = timeinfo.tm_hour % 12 == 0 ? 12 : timeinfo.tm_hour % 12;
+        snprintf(text, sizeof(text), "%d:%02d %s", hour, timeinfo.tm_min, timeinfo.tm_hour < 12 ? "AM" : "PM");
+    } else {
+        snprintf(text, sizeof(text), "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+    }
+
     DisplayManager.setTextColor(getDataOldColor());
-    DisplayManager.printText(0, 6, "No data", TEXT_ALIGNMENT::CENTER, 0);
+    DisplayManager.printText(0, 6, text, TEXT_ALIGNMENT::CENTER, 2);
 }
 
 bool BGDisplayFace::needsFrequentRefresh() const { return false; }
@@ -128,6 +139,10 @@ unsigned long BGDisplayFace::getStepMillis(ANIMATION_SPEED speed) {
 
 RenderDecision BGDisplayFace::getRenderDecision(const RenderContext& ctx) const {
     if (ctx.reason == RenderReason::TIME_TICK) {
+        // Without readings the face shows the time, so redraw it every minute
+        if (ctx.readings.empty()) {
+            return RenderDecision::FULL;
+        }
         if (ctx.dataIsOld != ctx.wasDataOld) {
             return RenderDecision::FULL;
         }

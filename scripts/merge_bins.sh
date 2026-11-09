@@ -50,7 +50,7 @@ echo "Merging binaries into a single file..."
     0x8000 "$PARTITIONS" \
     0xe000 "$BOOT_APP0" \
     0x10000 "$FIRMWARE" \
-    0x210000 "$LITTLEFS"
+    0x3B0000 "$LITTLEFS"
 
 if [ $? -ne 0 ]; then
     echo "Failed to merge binaries."
