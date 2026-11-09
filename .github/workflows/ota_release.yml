@@ -1,11 +1,19 @@
 name: OTA release
 
-# Push a tag such as v1.2.1 to build firmware.bin and littlefs.bin and publish them as a GitHub release.
+# Builds firmware.bin and littlefs.bin and publishes them as a GitHub release, when:
+#   - data/version.txt changes on main (the release and its tag v<version> are created here), or
+#   - a tag such as v1.2.1 is pushed, or
+#   - the workflow is started by hand from the Actions tab.
 # The clock installs them from "Update over WiFi" > "Check GitHub for updates".
 # (Tags starting with "v-" are left to the upstream GitHub Pages workflow.)
 
 on:
+  workflow_dispatch:
   push:
+    branches:
+      - main
+    paths:
+      - data/version.txt
     tags:
       - "v[0-9]*"
 
@@ -32,23 +40,42 @@ jobs:
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
 
-      - name: Write the version from the tag
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          printf '%s' "$version" > data/version.txt
-          echo "Building version $version"
-
-      - name: Build firmware
-        run: pio run --environment ulanzi
-      - name: Build filesystem image
-        run: pio run --target buildfs --environment ulanzi
-
-      - name: Publish the release
+      - name: Work out the version
+        id: version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            printf '%s' "$version" > data/version.txt
+          else
+            version="$(tr -d '[:space:]' < data/version.txt)"
+          fi
+          tag="v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists, nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Building version $version"
+
+      - name: Build firmware
+        if: steps.version.outputs.skip != 'true'
+        run: pio run --environment ulanzi
+      - name: Build filesystem image
+        if: steps.version.outputs.skip != 'true'
+        run: pio run --target buildfs --environment ulanzi
+
+      - name: Publish the release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
             .pio/build/ulanzi/firmware.bin \
             .pio/build/ulanzi/littlefs.bin \
-            --title "$GITHUB_REF_NAME" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
             --notes "Firmware and filesystem image for over-the-air updates."
