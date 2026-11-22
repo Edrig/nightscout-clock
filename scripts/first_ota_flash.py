@@ -33,6 +33,7 @@ import urllib.request
 
 DEFAULT_REPO = "Edrig/nightscout-clock"
 BLOCK_SIZE = 4096
+DISK_VERSION_2_0 = 0x00020000
 CONFIG_PATH = "/config.json"
 OTADATA_OFFSET = 0xE000
 PARTITION_TABLE_OFFSET = 0x8000
@@ -80,7 +81,9 @@ def find_littlefs(parts):
 
 
 def mount(image):
-    fs = LittleFS(block_size=BLOCK_SIZE, block_count=len(image) // BLOCK_SIZE, mount=False)
+    # Write on-disk version 2.0: the clock's littlefs may be older than 2.6 and unable to mount 2.1.
+    fs = LittleFS(block_size=BLOCK_SIZE, block_count=len(image) // BLOCK_SIZE, disk_version=DISK_VERSION_2_0,
+                  mount=False)
     fs.context.buffer = bytearray(image)
     fs.mount()
     return fs
