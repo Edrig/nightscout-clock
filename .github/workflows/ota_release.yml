@@ -15,6 +15,7 @@ on:
       - main
     paths:
       - data/version.txt
+      - "www-ota/**"
     tags:
       - "v[0-9]*"
 
@@ -24,8 +25,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    outputs:
-      published: ${{ steps.version.outputs.skip != 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -99,16 +98,23 @@ jobs:
             --title "$TAG" \
             --notes "firmware.bin and littlefs.bin: over-the-air updates. partitions.bin and boot_app0.bin: first USB flash with scripts/first_ota_flash.py."
 
+      # When the release already exists (only the page changed), the page serves that release's files.
       - name: Assemble the web flasher
-        if: steps.version.outputs.skip != 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          BUILT: ${{ steps.version.outputs.skip != 'true' }}
         run: |
           mkdir -p site/firmware
           cp -r www-ota/. site/
-          cp .pio/build/ulanzi/firmware.bin .pio/build/ulanzi/littlefs.bin .pio/build/ulanzi/partitions.bin site/firmware/
-          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin site/firmware/
+          if [ "$BUILT" = true ]; then
+            cp .pio/build/ulanzi/firmware.bin .pio/build/ulanzi/littlefs.bin .pio/build/ulanzi/partitions.bin site/firmware/
+            cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin site/firmware/
+          else
+            gh release download "$TAG" --dir site/firmware \
+              --pattern firmware.bin --pattern littlefs.bin --pattern partitions.bin --pattern boot_app0.bin
+          fi
           python3 - <<'PY'
           import hashlib, json, os
           d = "site/firmware"
@@ -119,7 +125,6 @@ jobs:
           PY
           touch site/.nojekyll
       - name: Upload the web flasher
-        if: steps.version.outputs.skip != 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: site
@@ -127,7 +132,7 @@ jobs:
   pages:
     name: Deploy the web flasher
     needs: release
-    if: needs.release.outputs.published == 'true' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write

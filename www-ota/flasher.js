@@ -27,6 +27,22 @@ const progress = (fraction, label) => {
     if (label) $("step").textContent = label
 }
 
+/**
+ * Log "label: 40 % (400 / 1024 Ko, 85 Ko/s)" every 10 %.
+ * @returns {(done: number) => void}
+ */
+function progressLog(label, total) {
+    const start = performance.now()
+    let next = 0
+    return done => {
+        const pct = Math.floor(done / total * 100)
+        if (pct < next && done < total) return
+        const seconds = Math.max((performance.now() - start) / 1000, 0.1)
+        log(`${label} : ${pct} % (${Math.round(done / 1024)} / ${Math.round(total / 1024)} Ko, ${Math.round(done / 1024 / seconds)} Ko/s)`)
+        next = pct - (pct % 10) + 10
+    }
+}
+
 function toBinaryString(bytes) {
     let out = ""
     for (let i = 0; i < bytes.length; i += 8192) out += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192))
@@ -77,10 +93,14 @@ async function connect() {
         if (!fs) throw new Error("Aucune partition LittleFS sur l'horloge")
 
         progress(0, `Lecture des réglages (${fs.size / 1024} Ko)…`)
-        const image = await loader.readFlash(fs.offset, fs.size, (_p, done, total) => progress(done / total))
+        log(`Lecture de la partition ${fs.name} (0x${fs.offset.toString(16)}, ${fs.size / 1024} Ko)`)
+        const readLog = progressLog("Lecture", fs.size)
+        const image = await loader.readFlash(fs.offset, fs.size, (_p, done, total) => { progress(done / total); readLog(done) })
+        log("Lecture terminée, recherche de config.json dans LittleFS")
         const wasm = await fetch("vendor/mklfs-0.1.0.wasm").then(r => r.arrayBuffer())
         try {
             settings = await readLittlefsFile(wasm, image, "config.json")
+            log(`config.json trouvé (${settings.length} octets)`)
             showSettings("lus sur l'horloge")
             progress(1, "Réglages lus. Vérifie le Wi-Fi ci-dessous puis installe.")
         } catch (e) {
@@ -107,10 +127,12 @@ async function install() {
             const r = await fetch(`firmware/${name}`, { cache: "no-store" })
             if (!r.ok) throw new Error(`firmware/${name} introuvable`)
             files[name] = new Uint8Array(await r.arrayBuffer())
+            log(`Téléchargé : ${name} (${Math.round(files[name].length / 1024)} Ko)`)
             const expected = release.sha256 && release.sha256[name]
             if (expected) {
                 const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", files[name]))].map(b => b.toString(16).padStart(2, "0")).join("")
                 if (hash !== expected) throw new Error(`${name} : empreinte SHA-256 incorrecte`)
+                log(`  SHA-256 ok`)
             }
         }
         const parts = parsePartitions(files["partitions.bin"])
@@ -120,22 +142,28 @@ async function install() {
         if (files["littlefs.bin"].length !== fs.size) throw new Error("littlefs.bin ne correspond pas à la partition")
 
         const fileArray = [
-            { address: 0x8000, data: files["partitions.bin"] },
-            { address: 0xe000, data: files["boot_app0.bin"] },
-            { address: app0.offset, data: files["firmware.bin"] },
-            { address: fs.offset, data: files["littlefs.bin"] },
+            { name: "partitions.bin", address: 0x8000, data: files["partitions.bin"] },
+            { name: "boot_app0.bin", address: 0xe000, data: files["boot_app0.bin"] },
+            { name: "firmware.bin", address: app0.offset, data: files["firmware.bin"] },
+            { name: "littlefs.bin", address: fs.offset, data: files["littlefs.bin"] },
         ]
-        if (settings) fileArray.push({ address: stagedConfigAddress(parts), data: stagedConfigBlob(settings) })
+        if (settings) fileArray.push({ name: "réglages", address: stagedConfigAddress(parts), data: stagedConfigBlob(settings) })
+        for (const f of fileArray) log(`À écrire : ${f.name} à 0x${f.address.toString(16)} (${Math.round(f.data.length / 1024)} Ko)`)
         const total = fileArray.reduce((n, f) => n + f.data.length, 0)
         const before = fileArray.map((_, i) => fileArray.slice(0, i).reduce((n, f) => n + f.data.length, 0))
+        const writeLogs = fileArray.map(f => progressLog(`Écriture ${f.name}`, f.data.length))
 
         progress(0, "Écriture sur l'horloge… ne la débranche pas.")
         await loader.writeFlash({
             fileArray: fileArray.map(f => ({ address: f.address, data: toBinaryString(f.data) })),
             flashSize: "keep", flashMode: "keep", flashFreq: "keep",
             eraseAll: false, compress: true,
-            reportProgress: (i, written, size) => progress((before[i] + written / size * fileArray[i].data.length) / total),
+            reportProgress: (i, written, size) => {
+                progress((before[i] + written / size * fileArray[i].data.length) / total)
+                writeLogs[i](Math.round(written / size * fileArray[i].data.length))
+            },
         })
+        log("Écriture terminée, redémarrage de l'horloge")
         await loader.after("hard_reset")
         await transport.disconnect().catch(() => {})
         progress(1, settings
