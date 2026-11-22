@@ -24,21 +24,34 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: ".node-version"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
+      # Filesystem builds compile the clock preview (web/emulator/build.mjs) with Emscripten.
+      - name: Read the Emscripten version
+        id: emsdk
+        run: echo "version=$(node web/emulator/build.mjs --emsdk-version)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/emsdk
+          key: ${{ runner.os }}-emsdk-${{ steps.emsdk.outputs.version }}
+      - name: Install Emscripten
+        run: |
+          [ -d ~/emsdk ] || git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          ~/emsdk/emsdk install ${{ steps.emsdk.outputs.version }}
+          ~/emsdk/emsdk activate ${{ steps.emsdk.outputs.version }}
 
       - name: Work out the version
         id: version
@@ -73,9 +86,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
+          # partitions.bin and boot_app0.bin are only for the first USB flash (scripts/first_ota_flash.py)
           gh release create "$TAG" \
             .pio/build/ulanzi/firmware.bin \
             .pio/build/ulanzi/littlefs.bin \
+            .pio/build/ulanzi/partitions.bin \
+            ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
             --target "$GITHUB_SHA" \
             --title "$TAG" \
-            --notes "Firmware and filesystem image for over-the-air updates."
+            --notes "firmware.bin and littlefs.bin: over-the-air updates. partitions.bin and boot_app0.bin: first USB flash with scripts/first_ota_flash.py."
