@@ -4,9 +4,9 @@
 #include <Arduino.h>
 
 // GitHub repository ("owner/name") whose latest release provides firmware.bin and littlefs.bin.
-// Override with -DOTA_GITHUB_REPO=\"owner/name\" in platformio.local.ini if you prefer.
+// A fork builds with -DOTA_GITHUB_REPO=\"owner/name\" (PLATFORMIO_BUILD_FLAGS) to update from its own releases.
 #ifndef OTA_GITHUB_REPO
-#define OTA_GITHUB_REPO "Edrig/nightscout-clock"
+#define OTA_GITHUB_REPO "ktomy/nightscout-clock"
 #endif
 
 enum class OTA_STATE : uint8_t {

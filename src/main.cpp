@@ -43,10 +43,14 @@ void setup() {
 
     DisplayManager.applySettings();
 
-    // "V 1.3.5" fits the matrix; a fork version such as 1.3.5.3 is shown without the "V " prefix
-    String version = VERSION;
-    DisplayManager.HSVtext(3, 6, (version.length() > 5 ? version : "V " + version).c_str(), true, 0);
-    delay(2000);
+    // A version too wide for the matrix (such as 1.3.5.3) scrolls across it instead
+    String version = "V " + String(VERSION);
+    if (DisplayManager.getTextWidth(version.c_str(), 0) > MATRIX_WIDTH - 3) {
+        DisplayManager.scrollColorfulText(version);
+    } else {
+        DisplayManager.HSVtext(3, 6, version.c_str(), true, 0);
+        delay(2000);
+    }
 
     PeripheryManager.setup();
 

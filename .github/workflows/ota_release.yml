@@ -80,7 +80,13 @@ jobs:
 
       - name: Build firmware
         if: steps.version.outputs.skip != 'true'
-        run: pio run --environment ulanzi
+        env:
+          # The clock updates from this repository's releases
+          PLATFORMIO_BUILD_FLAGS: -DOTA_GITHUB_REPO=\"${{ github.repository }}\"
+        run: |
+          pio run --environment ulanzi
+          grep -q "repos/${{ github.repository }}/releases/latest" .pio/build/ulanzi/firmware.bin \
+            || { echo "::error::firmware.bin does not update from ${{ github.repository }}"; exit 1; }
       - name: Build filesystem image
         if: steps.version.outputs.skip != 'true'
         run: pio run --target buildfs --environment ulanzi
