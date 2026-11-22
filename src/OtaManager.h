@@ -37,6 +37,10 @@ public:
     bool endFilesystemWrite();
 
     String readCurrentVersion();
+
+    // Settings left by the web flasher (www-ota) in the last 64 KB of the ota_1 slot, which stays unused until
+    // the first OTA update. Copied to config.json and erased on the first boot. Call after LittleFS.begin().
+    void importStagedConfig();
     static int compareVersions(const String& a, const String& b);
 
 private:

@@ -5,6 +5,7 @@ name: OTA release
 #   - a tag such as v1.2.1 is pushed, or
 #   - the workflow is started by hand from the Actions tab.
 # The clock installs them from "Update over WiFi" > "Check GitHub for updates".
+# The web flasher (www-ota/, first USB flash keeping the settings) is deployed to GitHub Pages with the release.
 # (Tags starting with "v-" are left to the upstream GitHub Pages workflow.)
 
 on:
@@ -23,6 +24,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.version.outputs.skip != 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -95,3 +98,47 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes "firmware.bin and littlefs.bin: over-the-air updates. partitions.bin and boot_app0.bin: first USB flash with scripts/first_ota_flash.py."
+
+      - name: Assemble the web flasher
+        if: steps.version.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p site/firmware
+          cp -r www-ota/. site/
+          cp .pio/build/ulanzi/firmware.bin .pio/build/ulanzi/littlefs.bin .pio/build/ulanzi/partitions.bin site/firmware/
+          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin site/firmware/
+          python3 - <<'PY'
+          import hashlib, json, os
+          d = "site/firmware"
+          names = ["partitions.bin", "boot_app0.bin", "firmware.bin", "littlefs.bin"]
+          info = {"tag": os.environ["TAG"], "version": os.environ["VERSION"],
+                  "sha256": {n: hashlib.sha256(open(f"{d}/{n}", "rb").read()).hexdigest() for n in names}}
+          json.dump(info, open(f"{d}/release.json", "w"), indent=2)
+          PY
+          touch site/.nojekyll
+      - name: Upload the web flasher
+        if: steps.version.outputs.skip != 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  pages:
+    name: Deploy the web flasher
+    needs: release
+    if: needs.release.outputs.published == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

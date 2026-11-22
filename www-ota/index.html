@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nightscout Clock OTA</title>
+<style>
+:root { --bg: #f6f7f9; --card: #fff; --text: #16181d; --muted: #5b6270; --line: #dde1e7; --accent: #2563eb; --warn: #b45309; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1115; --card: #171a21; --text: #e8eaee; --muted: #9aa3b2; --line: #2a2f3a; --accent: #4c8dff; --warn: #fbbf24; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; }
+.lead { color: var(--muted); margin: 0 0 24px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+h2 { font-size: 1.05rem; margin: 0 0 8px; }
+p { margin: 0 0 12px; }
+button { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.secondary { background: transparent; color: var(--accent); }
+a { color: var(--accent); }
+label { color: var(--muted); font-size: .95rem; }
+progress { width: 100%; height: 10px; margin-top: 12px; }
+#step { font-weight: 600; margin-top: 8px; min-height: 1.5em; }
+#log { margin-top: 12px; max-height: 180px; overflow: auto; font: 12px/1.45 ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; }
+.warn { color: var(--warn); }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Nightscout Clock, version OTA</h1>
+  <p class="lead">Premier flash par USB de la version avec mises à jour Wi-Fi, en gardant les réglages de l'horloge. Release disponible : <strong id="version">…</strong></p>
+
+  <p id="unsupported" class="warn" hidden>Ce navigateur ne gère pas Web Serial. Ouvre cette page dans Chrome ou Edge sur un ordinateur.</p>
+
+  <section>
+    <h2>1. Brancher l'horloge</h2>
+    <p>Branche l'horloge en USB, clique sur le bouton et choisis son port série. La page lit ses réglages sans rien modifier.</p>
+    <button id="connect" type="button">Connecter l'horloge</button>
+  </section>
+
+  <section>
+    <h2>2. Vérifier les réglages</h2>
+    <p id="settings">Pas encore lus.</p>
+    <div class="row">
+      <a id="backup" download="clock-settings-backup.json" hidden>Télécharger une copie des réglages</a>
+    </div>
+    <p style="margin-top:12px"><label>Ou charger un fichier de réglages (Download settings) : <input id="file" type="file" accept=".json,application/json"></label></p>
+    <p><label><input id="nosettings" type="checkbox"> Installer sans réglages</label></p>
+  </section>
+
+  <section>
+    <h2>3. Installer</h2>
+    <p>Écrit la table de partitions, le firmware et l'interface web, puis redémarre l'horloge. Ses réglages sont recopiés au premier démarrage.</p>
+    <button id="install" type="button" disabled>Installer</button>
+    <progress id="progress" max="100" value="0" hidden></progress>
+    <div id="step"></div>
+    <div id="log"></div>
+  </section>
+
+  <p class="lead">Ensuite, les mises à jour se font depuis la page de l'horloge : WiFi &amp; system &gt; Update over WiFi.</p>
+</main>
+<script type="module" src="flasher.js"></script>
+</body>
+</html>

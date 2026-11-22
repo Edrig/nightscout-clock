@@ -6,6 +6,7 @@
 #include "BGDisplayManager.h"
 #include "BGSourceManager.h"
 #include "DisplayManager.h"
+#include "OtaManager.h"
 #include "PeripheryManager.h"
 #include "ServerManager.h"
 #include "SettingsManager.h"
@@ -34,6 +35,8 @@ void setup() {
 
     DisplayManager.setup();
     SettingsManager.setup();
+    // Settings carried over by the web flasher on the first flash of the OTA build
+    OtaManager.importStagedConfig();
     if (!SettingsManager.loadSettingsFromFile()) {
         DisplayManager.showFatalError("Error loading software, please reinstall");
     }

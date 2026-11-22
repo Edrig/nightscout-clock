@@ -5,6 +5,8 @@
 #include <LittleFS.h>
 #include <Update.h>
 #include <WiFiClientSecure.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 #include <mbedtls/md.h>
 
 #include "DisplayManager.h"
@@ -45,6 +47,62 @@ bool OtaManager_::endFilesystemWrite() {
     }
     configBackup = "";
     return true;
+}
+
+// ---------- settings staged by the web flasher ----------
+
+static const char STAGED_CONFIG_MAGIC[8] = {'N', 'S', 'C', 'L', 'K', 'C', 'F', 'G'};
+static const uint32_t STAGED_CONFIG_AREA = 0x10000;  // last 64 KB of ota_1
+static const uint32_t STAGED_CONFIG_HEADER = 16;    // magic, length, CRC-32 (little endian)
+
+// Standard CRC-32 (zlib), the same as the web flasher computes.
+static uint32_t crc32Zlib(const uint8_t* data, size_t length) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; bit++) {
+            crc = (crc >> 1) ^ (0xEDB88320 & (0 - (crc & 1)));
+        }
+    }
+    return ~crc;
+}
+
+void OtaManager_::importStagedConfig() {
+    const esp_partition_t* slot =
+        esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, nullptr);
+    if (slot == nullptr || slot->size < STAGED_CONFIG_AREA || esp_ota_get_running_partition() == slot) {
+        return;
+    }
+    const uint32_t area = slot->size - STAGED_CONFIG_AREA;
+
+    uint8_t header[STAGED_CONFIG_HEADER];
+    if (esp_partition_read(slot, area, header, sizeof(header)) != ESP_OK ||
+        memcmp(header, STAGED_CONFIG_MAGIC, sizeof(STAGED_CONFIG_MAGIC)) != 0) {
+        return;
+    }
+    uint32_t length, crc;
+    memcpy(&length, header + 8, 4);
+    memcpy(&crc, header + 12, 4);
+
+    bool imported = false;
+    if (length > 0 && length <= STAGED_CONFIG_AREA - STAGED_CONFIG_HEADER) {
+        uint8_t* data = (uint8_t*)malloc(length);
+        if (data != nullptr) {
+            if (esp_partition_read(slot, area + STAGED_CONFIG_HEADER, data, length) == ESP_OK &&
+                crc32Zlib(data, length) == crc && data[0] == '{') {
+                File file = LittleFS.open(CONFIG_JSON, FILE_WRITE);
+                if (file) {
+                    imported = file.write(data, length) == length;
+                    file.close();
+                }
+            }
+            free(data);
+        }
+    }
+    DEBUG_PRINTF("OTA: staged settings %s\n", imported ? "imported" : "invalid, ignored");
+
+    // Erase the staging area either way so it is never imported twice.
+    esp_partition_erase_range(slot, area, STAGED_CONFIG_AREA);
 }
 
 String OtaManager_::readCurrentVersion() {
