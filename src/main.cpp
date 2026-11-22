@@ -43,7 +43,9 @@ void setup() {
 
     DisplayManager.applySettings();
 
-    DisplayManager.HSVtext(3, 6, String("V " + String(VERSION)).c_str(), true, 0);
+    // "V 1.3.5" fits the matrix; a fork version such as 1.3.5.3 is shown without the "V " prefix
+    String version = VERSION;
+    DisplayManager.HSVtext(3, 6, (version.length() > 5 ? version : "V " + version).c_str(), true, 0);
     delay(2000);
 
     PeripheryManager.setup();

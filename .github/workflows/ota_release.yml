@@ -66,6 +66,9 @@ jobs:
           else
             version="$(tr -d '[:space:]' < data/version.txt)"
           fi
+          # The firmware's VERSION (boot screen, logs) always matches version.txt
+          sed -i "s/^#define VERSION \".*\"/#define VERSION \"$version\"/" src/globals.h
+          grep -n '^#define VERSION' src/globals.h
           tag="v$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
