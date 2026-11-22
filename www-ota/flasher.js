@@ -2,12 +2,13 @@
 // 1. read the clock's partition table and LittleFS over Web Serial and take config.json from it,
 // 2. write the release (partition table, otadata, firmware, LittleFS) published next to this page,
 // 3. leave config.json in the last 64 KB of the ota_1 slot; the firmware copies it to LittleFS on its first boot.
-import { ESPLoader, Transport } from "./vendor/esptool-js-0.7.1.js"
+import { ESPLoader, Transport } from "./vendor/esptool-js-0.6.1.js"
 import { findApp, findLittlefs, parsePartitions, readLittlefsFile, stagedConfigAddress, stagedConfigBlob } from "./flash-lib.js"
 
 const $ = id => document.getElementById(id)
-// 460800 rather than 921600: the clock's CH340 USB chip is more reliable at it
-const BAUD = 460800
+// Same library line (esptool-js 0.6) and speed as the nsclock.app installer, which works with the clock's CH340.
+// At 115200 the loader never changes baud; reading the 1 MB filesystem takes about 90 seconds.
+const BAUD = 115200
 const RELEASE_FILES = ["partitions.bin", "boot_app0.bin", "firmware.bin", "littlefs.bin"]
 
 let loader = null
@@ -75,8 +76,8 @@ async function connect() {
     $("connect").disabled = true
     try {
         const port = await navigator.serial.requestPort({})
-        transport = new Transport(port, false)
-        loader = new ESPLoader({ transport, baudrate: BAUD, terminal })
+        transport = new Transport(port)
+        loader = new ESPLoader({ transport, baudrate: BAUD, terminal, debugLogging: $("debug").checked })
         progress(0, "Connexion à l'horloge…")
         const chip = await loader.main()
         log(`Connecté : ${chip}`)
@@ -105,7 +106,7 @@ async function connect() {
         }
     } catch (e) {
         log(`Erreur : ${e.message}`)
-        $("step").textContent = "Connexion impossible. Débranche et rebranche l'horloge, puis réessaie."
+        $("step").textContent = "Connexion impossible. Ferme les autres programmes qui utilisent le port (moniteur série, autre onglet), débranche et rebranche l'horloge, puis réessaie. Coche « Logs détaillés » pour plus d'informations."
         loader = null
         if (transport) await transport.disconnect().catch(() => {})
         $("connect").disabled = false
