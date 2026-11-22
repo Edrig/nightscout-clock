@@ -2,11 +2,12 @@
 // 1. read the clock's partition table and LittleFS over Web Serial and take config.json from it,
 // 2. write the release (partition table, otadata, firmware, LittleFS) published next to this page,
 // 3. leave config.json in the last 64 KB of the ota_1 slot; the firmware copies it to LittleFS on its first boot.
-import { ESPLoader, Transport } from "./vendor/esptool-js-0.5.7.js"
+import { ESPLoader, Transport } from "./vendor/esptool-js-0.7.1.js"
 import { findApp, findLittlefs, parsePartitions, readLittlefsFile, stagedConfigAddress, stagedConfigBlob } from "./flash-lib.js"
 
 const $ = id => document.getElementById(id)
-const BAUD = 921600
+// 460800 rather than 921600: the clock's CH340 USB chip is more reliable at it
+const BAUD = 460800
 const RELEASE_FILES = ["partitions.bin", "boot_app0.bin", "firmware.bin", "littlefs.bin"]
 
 let loader = null
@@ -41,12 +42,6 @@ function progressLog(label, total) {
         log(`${label} : ${pct} % (${Math.round(done / 1024)} / ${Math.round(total / 1024)} Ko, ${Math.round(done / 1024 / seconds)} Ko/s)`)
         next = pct - (pct % 10) + 10
     }
-}
-
-function toBinaryString(bytes) {
-    let out = ""
-    for (let i = 0; i < bytes.length; i += 8192) out += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192))
-    return out
 }
 
 function showSettings(source) {
@@ -155,7 +150,7 @@ async function install() {
 
         progress(0, "Écriture sur l'horloge… ne la débranche pas.")
         await loader.writeFlash({
-            fileArray: fileArray.map(f => ({ address: f.address, data: toBinaryString(f.data) })),
+            fileArray: fileArray.map(f => ({ address: f.address, data: f.data })),
             flashSize: "keep", flashMode: "keep", flashFreq: "keep",
             eraseAll: false, compress: true,
             reportProgress: (i, written, size) => {
