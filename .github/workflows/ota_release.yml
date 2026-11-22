@@ -25,6 +25,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # The clock updates from this repository's releases. Set for the whole job: the filesystem build must use
+      # the same flags, or PlatformIO cleans the build folder and firmware.bin with it.
+      PLATFORMIO_BUILD_FLAGS: -DOTA_GITHUB_REPO=\"${{ github.repository }}\"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -80,9 +84,6 @@ jobs:
 
       - name: Build firmware
         if: steps.version.outputs.skip != 'true'
-        env:
-          # The clock updates from this repository's releases
-          PLATFORMIO_BUILD_FLAGS: -DOTA_GITHUB_REPO=\"${{ github.repository }}\"
         run: |
           pio run --environment ulanzi
           grep -q "repos/${{ github.repository }}/releases/latest" .pio/build/ulanzi/firmware.bin \
