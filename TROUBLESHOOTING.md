@@ -102,7 +102,10 @@ If everything looks fine and the error persists, [collect logs](#collecting-logs
 
 Other numbers are HTTP status codes from the server. For example, `301` usually means a wrong address or protocol (`http` instead of `https`), and `401` or `403` means the API secret or credentials are wrong.
 
-### "NO DATA" or no new readings
+### "NO DATA", the time in gray, or no new readings
+
+Without any readings the clock shows the current time in the old-data color (gray by default); "No data" means it has neither readings nor the time yet, at boot or without internet.
+
 
 - **Dexcom:** enter the username and password of the Dexcom account that runs the sensor (the one used in the Dexcom app), not a follower's account. Sharing must be turned on in the Dexcom app, with at least one follower. Choose the right server: US, or outside the US.
 - **LibreLinkUp:** if the clock says `LibreLinkUp requires action in the LibreLinkUp app`, open the LibreLinkUp app and accept the new terms or confirm the requested step, then restart the clock.
